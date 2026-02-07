@@ -156,9 +156,14 @@ class CH32V003Bootloader:
         if data is None: data = []
         while not self.rx_queue.empty(): self.rx_queue.get_nowait()
 
-        if isinstance(address, str):
-            address = bytes.fromhex(address)
 
+        #Handle integer Node-id and HEX-UID
+        if isinstance(address, str) and len(address) == 16:
+            address = bytes.fromhex(address)
+        elif isinstance(address, str) and len(address) <= 3:
+            address = int(address)
+    
+    
         hdr = HDR_MASK_BASE
         if isinstance(address, (bytes, bytearray, list)) and len(address) == 8:
             hdr |= HDR_FLAG_64BIT
