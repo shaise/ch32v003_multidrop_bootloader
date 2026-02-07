@@ -330,6 +330,10 @@ def main():
     parser.add_argument('-i', '--file', help='Firmware file')
     parser.add_argument('--fw', type=int, default=0)
     
+    parser.add_argument('--set_fw_id', type=int, default=None, help='Set firmware id')
+    parser.add_argument('--set_node_id', type=int, default=None, help='Set node id')
+    
+    
     # Use "nargs='?'" to make the value optional but immediately following the flag
     # Use "const" to set the value if the flag is present but no value is provided
     parser.add_argument('--search', type=int, nargs='?', const=63, help='Scan nodes. Optional: slot size (default 63)')
@@ -343,6 +347,14 @@ def main():
 
     try:
         loader.enter_bootloader()
+        
+        if args.set_fw_id:
+            loader.set_fw_id(args.uid, args.set_fw_id)
+
+        if args.set_node_id:
+            loader.set_node_id(args.uid, args.set_node_id)
+            
+            
         
         # Handle Writing firmware
         if args.write:
