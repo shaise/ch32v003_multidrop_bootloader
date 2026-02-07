@@ -186,10 +186,10 @@ void flash_write_option_data(uint8_t data0, uint8_t data1) {
    
     //Access the registers as 32bit to save flash.
     pu32_holding[0] = pu32_option[0];                // RDPR and USER
-    pu32_holding[1] = (uint32_t)data0 | 
-                      ((uint32_t)(~data0 & 0xFF) << 8) | 
-                      ((uint32_t)data1 << 16) | 
-                      ((uint32_t)(~data1 & 0xFF) << 24);
+    pu32_holding[1] = (uint32_t)data1 | 
+                      ((uint32_t)(~data1 & 0xFF) << 8) | 
+                      ((uint32_t)data0 << 16) | 
+                      ((uint32_t)(~data0 & 0xFF) << 24);
     pu32_holding[2] = pu32_option[2];                // WRPR0 and WRPR1
 
     //Do an undocumented bit in OB->USER 0x20 tell the MCU to enter bootloader first?

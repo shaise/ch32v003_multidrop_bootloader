@@ -390,6 +390,8 @@ def main():
 
         if args.run:
             loader.start_app()
+
+                
     finally:
         loader.close()
         
