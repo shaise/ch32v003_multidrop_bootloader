@@ -231,12 +231,14 @@ void process_packet(Packet_t* rx){
         uint8_t value = rx->data[1];
 
         if(subindex == 0){
+            flash_write_option_data(node_id, value);
+        }
+        
+        if(subindex == 1){
             flash_write_option_data(value, firmware_id);
         }
 
-        if(subindex == 1){
-            flash_write_option_data(node_id, value);
-        }
+
     }else{
         //ignore invalid commands.
         return;
