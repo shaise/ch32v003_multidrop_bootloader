@@ -282,7 +282,7 @@ class CH32V003Bootloader:
             firmware_data += b'\xFF' * padding
 
         total_blocks = len(firmware_data) // 64
-        self._log(f"Flashing {len(firmware_data)} bytes ({total_blocks} blocks) to FW-ID: 0x{fw_id:02X}")
+        self._log(f"Flashing {len(firmware_data)} bytes ({total_blocks} blocks) to FW-ID: {fw_id}")
         
         start_time = time.perf_counter()
         self.send_packet(BROADCAST_ID, BOOT_SILENCE)
@@ -329,7 +329,7 @@ class CH32V003Bootloader:
 
 def main():
     parser = argparse.ArgumentParser(description='CH32V003 Bootloader Tool')
-    parser.add_argument('--port', '-p', default='COM13')
+    parser.add_argument('--port', '-p', default='COM8')
     parser.add_argument('--baud', '-b', type=int, default=9600)
     parser.add_argument('--uid', help='Target UID')
     parser.add_argument('-i', '--file', help='Firmware file')
