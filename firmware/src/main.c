@@ -10,7 +10,7 @@
 //-----------------------------------------------------------------
 //Bootloader info
 #define BOOTLOADER_MAJOR    01
-#define BOOTLOADER_MINOR    01
+#define BOOTLOADER_MINOR    02
 
 const uint8_t chip_name[] = {
     0x43, 0x48, 0x33, 0x32, 
