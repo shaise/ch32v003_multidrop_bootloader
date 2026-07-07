@@ -29,7 +29,7 @@ void initialize(void);
 void deinitilize(void);
 
 Packet_t packet;
-uint8_t tx_buffer[128];
+uint8_t tx_buff[128];
 uint8_t tx_data[64];
 uint8_t stay_silent=0;
 uint32_t boot_timeout = 0;
@@ -91,32 +91,9 @@ void bootloader_start_app(void){
  * @brief Process incomming packet
  */
 void process_packet(Packet_t* rx){
-    uint8_t chip_id[8];
-    uint8_t node_id;
-    uint8_t firmware_id;
-    uint32_t isBroadcast;
-
     //fetch info
-    firmware_id = get_firmware_id();
-    node_id = get_node_id();
-    GetChipID64(&chip_id[0]);
-
-    //check if the address is for us or broadcast
-    if(rx->addr_len == 1){
-        uint8_t adr8 = rx->address[0];
-        isBroadcast = (adr8 == 0xFF); 
-        if((adr8 != node_id) && !isBroadcast){
-            return;
-        } 
-    }else{
-        //check if the UID match.
-        if(memcmp64(rx->address, chip_id) == 0){
-            return;
-        }
-    }
-
     const uint8_t cmd = rx->command;
-    const uint8_t datalen = rx->data_len;
+    const uint8_t datalen = rx->packet_len - 4;
 
     uint32_t tx_len=0;
     uint8_t* tx_ptr = (uint8_t*)&tx_data[0];
@@ -130,12 +107,7 @@ void process_packet(Packet_t* rx){
         //Point tx_ptr to stored chip_name.
         tx_len = sizeof(chip_name);
         tx_ptr = (uint8_t*)&chip_name[0];
-    }else if(cmd == BOOT_ERASE && datalen == 3){
-        //only allow specific firmware.
-        if(rx->data[0] != firmware_id){
-            return;
-        }
-
+    }else if(cmd == PROTOCMD_CHIP_ERASE){
         uint16_t block = *(uint16_t*)(&rx->data[1]);
         uint32_t adr = 0x08000000 + block*64;
 
@@ -250,7 +222,7 @@ void process_packet(Packet_t* rx){
     }
 
     //Build response
-    uint8_t* tx_buffer_ptr = (uint8_t*)&tx_buffer[0];
+    uint8_t* tx_buffer_ptr = (uint8_t*)&tx_buff[0];
     uint32_t packet_len = packet_serialize(tx_buffer_ptr, node_id, rx->command, tx_ptr, tx_len);
     while(packet_len--){
         uart_write(*tx_buffer_ptr++);

@@ -135,6 +135,19 @@ void flash_erase(uint32_t adr) {
     regs[R_CTLR] &= ~CR_PAGE_ER;
 }
 
+void flash_bulk_erase(void) {
+    volatile uint32_t* regs = get_flash_regs();
+
+    flash_unlock(regs);
+
+    regs[R_CTLR] |= CR_MER_Set;
+    regs[R_CTLR] |= CR_STRT_Set;
+    while(regs[R_STATR] & SR_BSY){};
+    regs[R_CTLR] &= ~CR_MER_Set;
+}
+
+
+
 void flash_write(uint32_t adr, uint8_t data[64]) {
 
     volatile uint32_t *dst = (volatile uint32_t*)adr;

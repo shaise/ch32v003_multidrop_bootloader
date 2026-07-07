@@ -4,24 +4,28 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define PREAMBLE_BYTE  0x7F
-#define PREAMBLE_COUNT 5
+#define DELIMITER_BYTE 0x7E
+#define ESC_BYTE 0x7D
+#define MAX_DATA_LEN 64
 
-typedef enum {
-    PKT_TYPE_REQUEST  = 0x00,
-    PKT_TYPE_RESPONSE = 0x01
-} PacketType_t;
+#define PROTOFLAG_GOT_ESC      0x01
+#define PROTOFLAG_DEFERED_MODE 0x02
+
+#define PROTOCMD_INIT 0x01
+#define PROTOCMD_CHIP_ERASE 0x02
+#define PROTOCMD_WRITE_SECTOR 0x03
+#define PROTOCMD_VERIFY_SECTOR 0x04
+#define PROTOCMD_EXIT_BOOT 0x2B
+#define PROTOCMD_VERIFY_REPORT 0x85
 
 typedef struct {
-    PacketType_t type;
     uint8_t command;
-
-    uint8_t address[8] __attribute__((aligned(4)));;
-    uint8_t addr_len;
-    
-    uint8_t data_len;
-    uint8_t data[255] __attribute__((aligned(4)));;
+    uint8_t packet_len;
+    uint16_t address;
+    uint8_t data[MAX_DATA_LEN]__attribute__((aligned(4)));;
 } Packet_t;
+
+
 
 /**
  * @brief Serializes a RESPONSE packet .

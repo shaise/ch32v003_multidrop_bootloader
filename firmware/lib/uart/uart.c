@@ -1,14 +1,65 @@
 #include "uart.h"
 #include <ch32v00x.h>
 
+#define TXBUFF_SIZE 64
+#define TXBUFF_MASK 0x3F
+uint8_t tx_buffer[TXBUFF_SIZE];
+uint8_t tx_head = 0;
+uint8_t tx_tail = 0;
+uint8_t tx_full = 0;
+
+inline uint8_t tx_bytes_available(void)
+{
+    return tx_full || tx_head != tx_tail;
+}
+
+inline void tx_push(uint8_t byte)
+{
+    if (!tx_full)
+    {
+        tx_buffer[tx_head] = byte;
+        tx_head++;
+        tx_head &= TXBUFF_MASK;
+        tx_full = tx_head == tx_tail;
+    }
+}
+
+inline uint8_t tx_pop() // assumes byte available - no checks
+{
+    uint8_t res = tx_buffer[tx_tail];
+    tx_tail++;
+    tx_full = 0;
+}
+
+/**
+ * @brief Check and send available tx bytes  
+ */
+void uart_poll(void)
+{
+    if ((USART1->STATR & USART_FLAG_TXE) != (uint16_t)RESET)
+    {
+        if (tx_bytes_available())
+        {
+            USART1->DATAR = tx_pop();
+        }
+    }
+}
+
 /**
  * @brief Write outgoing data
  */
 void uart_write(uint8_t ch){
-    //Wait for free buffer before adding new data.
     //may use USART_FLAG_TC instead?.
-    while((USART1->STATR & USART_FLAG_TXE) == (uint16_t)RESET);
-    USART1->DATAR = ch;
+    if ((USART1->STATR & USART_FLAG_TXE) != (uint16_t)RESET)
+    {
+        if (tx_bytes_available())
+        {
+            USART1->DATAR = tx_pop();
+            tx_push(ch);
+        }
+        else
+            USART1->DATAR = ch;
+    }
 }
 
 /**
