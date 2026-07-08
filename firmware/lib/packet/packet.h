@@ -28,18 +28,11 @@ typedef struct {
 
 
 /**
- * @brief Serializes a RESPONSE packet .
- * @note Only 8bit addressing supported.
- * @param buffer   Output buffer where the serialized stream will be stored.
- * @param node_id  The 8-bit destination address/node identifier.
- * @param cmd      The command byte to be executed by the receiver.
- * @param data     Pointer to the payload data buffer (can be NULL if datalen is 0).
- * @param datalen  Length of the payload (0-255).
- * @return uint32_t Total number of bytes written to the buffer (including preambles, header, and CRC).
+ * @brief Serializes a RESPONSE packet. Encodes the packet and send to tx buffer
+ * @param pkt   Packet to send.
  */
-uint32_t packet_serialize(uint8_t* buffer,
-    uint8_t node_id, 
-    uint8_t cmd, uint8_t* data, uint8_t datalen);
+void packet_send(Packet_t *pkt);
+
 
 /**
  * @brief Handles a single incoming byte (supports both Request and Response).
@@ -48,8 +41,8 @@ uint32_t packet_serialize(uint8_t* buffer,
 uint8_t Packet_Update_Rx(uint8_t byte, Packet_t *pkt);
 
 /**
- * @brief Get total number of sync chars found
+ * @brief in defered mode command forwarding is delayed until command is evaluated
  */
-uint32_t get_packet_total_sync_count(void);
+uint8_t is_defered_mode(void);
 
 #endif

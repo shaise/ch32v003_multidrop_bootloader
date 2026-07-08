@@ -8,12 +8,12 @@ uint8_t tx_head = 0;
 uint8_t tx_tail = 0;
 uint8_t tx_full = 0;
 
-inline uint8_t tx_bytes_available(void)
+static inline uint8_t tx_bytes_available(void)
 {
     return tx_full || tx_head != tx_tail;
 }
 
-inline void tx_push(uint8_t byte)
+static inline void tx_push(uint8_t byte)
 {
     if (!tx_full)
     {
@@ -24,11 +24,12 @@ inline void tx_push(uint8_t byte)
     }
 }
 
-inline uint8_t tx_pop() // assumes byte available - no checks
+static inline uint8_t tx_pop() // assumes byte available - no checks
 {
     uint8_t res = tx_buffer[tx_tail];
     tx_tail++;
     tx_full = 0;
+    return res;
 }
 
 /**

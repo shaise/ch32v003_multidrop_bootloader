@@ -13,7 +13,7 @@ packets are framed using 7E delimiter and 7D escape code
 
 
 ## Commands
-- 0x01: Init upgrade
+- 0x81: Init upgrade
 - 0x02: Chip erase
 - 0x03: Write sector
 - 0x04: Verify sector
@@ -21,7 +21,12 @@ packets are framed using 7E delimiter and 7D escape code
 - 0x85: Report verification
 
 ### Init upgrade
-- Command: 01 02
+- Command: `81 04 count_lo count_hi`
+- Reset all boot vars and flags
+- Host sends this command with count = 0
+- his is a difered command, meaning the receiver does not forward the command to tx until evaluation
+- Receiver increment count value and forwards to next device in the chain
+- Host receives the command from the last device in the chain and count determines number of devices in the chain
 
 ### Chip erase
 - Command: `02 02`

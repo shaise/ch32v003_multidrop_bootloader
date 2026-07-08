@@ -1,6 +1,5 @@
 #include "packet.h"
-#include "crc32.h"
-
+#include "uart.h"
 
 typedef enum { 
     STATE_IDLE, STATE_HDR, STATE_ADDR, STATE_CMD, STATE_LEN, STATE_DATA, STATE_CRC 
@@ -13,27 +12,32 @@ typedef enum {
 
 
 /**
- * @brief Serialize a packet into a buffer.
+ * @brief Serialize a packet into tx buffer.
  */
-uint32_t packet_serialize(uint8_t* buffer,
-    uint8_t node_id, 
-    uint8_t cmd, uint8_t* data, uint8_t datalen)
+void packet_send(Packet_t *pkt)
 {
-    return 0;
+    uint8_t *ptr = (uint8_t *)pkt;
+    for (int i = 0; i < pkt->packet_len; i++, ptr++)
+    {
+        uint8_t byte = *ptr;
+        if (byte == DELIMITER_BYTE || byte == ESC_BYTE) {
+            uart_write(ESC_BYTE);
+            byte &= ~0x20;
+        } 
+        uart_write(byte);
+    }
+    uart_write(DELIMITER_BYTE);
 }
 
 volatile uint8_t protocol_flags = 0;
 volatile uint8_t rx_index = 0;
 
-uint32_t get_packet_total_sync_count(void){
-    return 0;
+uint8_t is_defered_mode(void)
+{
+    return protocol_flags & PROTOFLAG_DEFERED_MODE;
 }
 
 uint8_t Packet_Update_Rx(uint8_t byte, Packet_t *pkt) {
-    static uint8_t index ;
-    static uint8_t crc_buf[4];
-    static uint32_t crc_state;
-
     // --- Resync Logic ---
     // Always active to detect resync.
     if (byte == DELIMITER_BYTE) {

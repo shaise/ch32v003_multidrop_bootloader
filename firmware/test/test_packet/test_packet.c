@@ -23,7 +23,7 @@ void test_packet_serialization_basic(void) {
     uint8_t node_id = 0x12;
     uint8_t cmd = 0xAA;
     
-    uint32_t total_len = packet_serialize(buffer, node_id, cmd, payload, sizeof(payload));
+    uint32_t total_len = packet_send(buffer, node_id, cmd, payload, sizeof(payload));
 
     // Verify Preambles (5 bytes of 0x7F)
     for(int i = 0; i < 5; i++) {
@@ -50,7 +50,7 @@ void test_packet_round_trip(void) {
     uint8_t payload[] = "Hello";
     uint8_t node_id = 0x05;
     uint8_t cmd = 0x02;
-    uint32_t len = packet_serialize(buffer, node_id, cmd, payload, 5);
+    uint32_t len = packet_send(buffer, node_id, cmd, payload, 5);
 
     uint8_t result = 0;
     for (uint32_t i = 0; i < len; i++) {
@@ -77,7 +77,7 @@ void test_packet_round_trip(void) {
  */
 void test_packet_invalid_crc(void) {
     uint8_t payload[] = {0x01, 0x02, 0x03};
-    uint32_t len = packet_serialize(buffer, 0x01, 0x10, payload, 3);
+    uint32_t len = packet_send(buffer, 0x01, 0x10, payload, 3);
 
     // Corrupt the first data byte (Index 9: 5 preambles + 4 header bytes)
     buffer[9] ^= 0xFF; 
@@ -98,7 +98,7 @@ void test_packet_invalid_crc(void) {
 void test_packet_resync(void) {
     uint8_t garbage[] = {0x00, 0xFF, 0x7F, 0x7F, 0x22}; // 0x22 is not a valid header
     uint8_t payload[] = {0x44};
-    uint32_t packet_len = packet_serialize(buffer, 0x01, 0x01, payload, 1);
+    uint32_t packet_len = packet_send(buffer, 0x01, 0x01, payload, 1);
 
     // 1. Feed garbage
     for(int i = 0; i < sizeof(garbage); i++) {
