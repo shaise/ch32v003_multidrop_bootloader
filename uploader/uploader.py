@@ -12,27 +12,20 @@ PREAMBLE_BYTE = 0x7F
 PREAMBLE_RX_COUNT = 5
 PREAMBLE_TX_COUNT = 12
 
+ESC_BYTE = 0x7D
+DELIM_BYTE = 0x7E
+
 HDR_MASK_BASE = 0x80      
 HDR_FLAG_64BIT = 0x02    
 BROADCAST_ID = 0xFF
 
-BOOT_GET_INFO = 0x01
-BOOT_GET_CHIP_ID = 0x02
-
 # firmware update commands
-BOOT_WRITE = 0x31
-BOOT_ERASE = 0x44
-BOOT_GET_CRC = 0xA1
-BOOT_GO = 0x21
-
-#search commands
-BOOT_GET_ID = 0x11
-BOOT_SILENCE = 0x12
-BOOT_UNSILENCE = 0x13
-
-#Node info commands
-BOOT_GET_NODE_INFO = 0xC1
-BOOT_SET_NODE_INFO = 0xC2
+BOOT_INIT =          0x01
+BOOT_CHIP_ERASE =    0x02
+BOOT_WRITE_SECTOR =  0x03
+BOOT_VERIFY_SECTOR = 0x04
+BOOT_EXIT_BOOT =     0x2B
+BOOT_VERIFY_REPORT = 0x85
 
 
 class CH32V003Bootloader:
@@ -40,6 +33,8 @@ class CH32V003Bootloader:
     
     def __init__(self, port, baud=9600, verbose=False):
         self.verbose = verbose
+        self.raw_buffer = bytearray()
+        self.got_esc = False
         try:
             self.ser = serial.Serial()
             self.ser.port     = port
@@ -77,119 +72,117 @@ class CH32V003Bootloader:
         self.ser.close()
 
     # --- Communication Core ---
+    def poll_uart_msg(self):
+        got_delim = False
 
-    def _calculate_crc32(self, data):
-        return binascii.crc32(data) & 0xFFFFFFFF
-
-    def _uart_reader_thread(self):
-        raw_buffer = bytearray()
-        HDR_MASK_TYPE = 0x01
-
-        while not self.stop_thread:
-            try:
-                if self.ser.in_waiting > 0:
-                    with self.serial_lock:
-                        raw_buffer.extend(self.ser.read(self.ser.in_waiting))
+        while self.ser.in_waiting > 0:
+            b = self.ser.read(1)[0]
+            if b == DELIM_BYTE:
+                got_delim = True
+                self.got_esc = False
+                break
+            elif b == ESC_BYTE:
+                self.got_esc = True
+            elif self.got_esc:
+                self.raw_buffer.append(b | 0x20)
+            else:
+                self.raw_buffer.append(b)
+        buff = self.raw_buffer
+        bufflen = len(buff)
+        res = None
+        if got_delim and  bufflen > 0:
+           len = buff[1] if  bufflen > 1 else 0
+           res = {
+                    'cmd': buff[0],
+                    'len': len,
+                    'addr': buff[2] + 256 * buff[3] if bufflen > 3 else 0,
+                    'data': buff[4:] if bufflen > 4 else [],
+                    'raw': buff
+                }
+           self.raw_buffer.clear()
+        return res
                 
-                while len(raw_buffer) >= (PREAMBLE_RX_COUNT + 8):
-                    pre_len = 0
-                    hdr_pos = -1
-                    
-                    for i in range(len(raw_buffer)):
-                        if raw_buffer[i] == PREAMBLE_BYTE:
-                            pre_len += 1
-                        else:
-                            if pre_len >= PREAMBLE_RX_COUNT:
-                                hdr_pos = i
-                                break
-                            pre_len = 0
-                    
-                    if hdr_pos == -1:
-                        raw_buffer = raw_buffer[-PREAMBLE_RX_COUNT:]
-                        break
-
-                    hdr = raw_buffer[hdr_pos]
-                    if (hdr & 0xF0) != HDR_MASK_BASE:
-                        raw_buffer = raw_buffer[hdr_pos + 1:]
-                        continue
-                    
-                    if not (hdr & HDR_MASK_TYPE):
-                        raw_buffer = raw_buffer[hdr_pos + 1:]
-                        continue
-
-                    is_64 = (hdr & HDR_FLAG_64BIT) != 0
-                    addr_len = 8 if is_64 else 1
-                    len_idx = hdr_pos + 1 + addr_len + 1
-                    
-                    if len(raw_buffer) <= len_idx: 
-                        break 
-                    
-                    data_len = raw_buffer[len_idx]
-                    total_packet_len = 1 + addr_len + 1 + 1 + data_len + 4 
-                    
-                    if len(raw_buffer) < (hdr_pos + total_packet_len):
-                        break 
-
-                    payload_for_crc = raw_buffer[hdr_pos : hdr_pos + total_packet_len - 4]
-                    rx_crc = struct.unpack('<I', raw_buffer[hdr_pos + total_packet_len - 4 : hdr_pos + total_packet_len])[0]
-                    
-                    if rx_crc == self._calculate_crc32(payload_for_crc):
-                        packet_data = raw_buffer[hdr_pos : hdr_pos + total_packet_len]
-                        addr_raw = packet_data[1 : 1 + addr_len]
-                        
-                        self.rx_queue.put({
-                            'node_id': addr_raw[0] if addr_len == 1 else None,
-                            'uid': addr_raw.hex().upper() if addr_len == 8 else None,
-                            'cmd': packet_data[1 + addr_len],
-                            'data': packet_data[1 + addr_len + 2 : 1 + addr_len + 2 + data_len],
-                            'raw': packet_data
-                        })
-                        raw_buffer = raw_buffer[hdr_pos + total_packet_len:]
-                    else:
-                        raw_buffer = raw_buffer[hdr_pos + 1:]
-                
-                time.sleep(0.001)
-            except Exception:
-                time.sleep(0.01)
-
-    def send_packet(self, address, cmd, data=None):
+    def send_packet(self, cmd, address=None, data=None):
         if data is None: data = []
-        while not self.rx_queue.empty(): self.rx_queue.get_nowait()
-
-
-        #Handle integer Node-id and HEX-UID
-        if isinstance(address, str) and len(address) == 16:
-            address = bytes.fromhex(address)
-        elif isinstance(address, str) and len(address) <= 3:
-            address = int(address)
-    
-    
-        hdr = HDR_MASK_BASE
-        if isinstance(address, (bytes, bytearray, list)) and len(address) == 8:
-            hdr |= HDR_FLAG_64BIT
-            addr_bytes = bytes(address)
-        elif isinstance(address, int):
-            addr_bytes = bytes([address & 0xFF])
-        elif isinstance(address, (bytes, bytearray)) and len(address) == 1:
-            addr_bytes = address
+        buff = bytearray()
+        buff.append(cmd)
+        if not address:
+            buff.append(2)
         else:
-            raise ValueError(f"Invalid Address: {address}")
+            buff.append(4 + len(data))
+            buff.append(address & 0xFF)
+            buff.append((address >> 8) & 0xFF)
+            buff.extend(data)
+        encbuff = bytearray()
+        for b in buff:
+            if b == ESC_BYTE or b == DELIM_BYTE:
+                encbuff.append(ESC_BYTE)
+                encbuff.append(b & 0xDF)
+            else:
+                encbuff.append(b)
+        encbuff.append(DELIM_BYTE)
+        self.ser.write(encbuff)
+        self.ser.flush()
 
-        payload = bytes([hdr]) + addr_bytes + bytes([cmd & 0xFF, len(data) & 0xFF]) + bytes(data)
-        crc = self._calculate_crc32(payload)
-        full_packet = bytes([PREAMBLE_BYTE] * PREAMBLE_TX_COUNT) + payload + struct.pack('<I', crc)
-        
-        with self.serial_lock:
-            self.ser.write(full_packet)
-            self.ser.flush()
-
-    def get_response(self, timeout=0.5):
-        try: return self.rx_queue.get(timeout=timeout)
-        except queue.Empty: return None
+    def get_response(self, timeout_ms=1000):
+        timeout_ms
+        res = None
+        while timeout_ms > 0:
+            res = self.poll_uart_msg()
+            if res:
+                break
+            time.sleep(0.01)
+            timeout_ms -= 10
+        return res
 
     # --- High Level Commands ---
 
-    def set_fw_id(self, address, fw_id):
+    def send_init(self):
+        """Starts upgrade process."""
+        self._log(f"Initializing upgrade process...")
+        self.send_packet(BOOT_INIT, 0x00)
+        resp = self.get_response()
+        if resp:
+            self._log(f"Done. {resp["addr"]}Devices found")
+            return True
+        self._log("No response from devices.")
+        return False
+    
+    def send_erase_chip(self):
+        """Erase device flash."""
+        self._log(f"Erasing device...")
+        self.send_packet(BOOT_CHIP_ERASE)
+        resp = self.get_response()
+        if resp:
+            self._log("Done.")
+            return True
+        self._log("No response from devices.")
+        return False
+    
+    def send_write_sector(self, addr, sector):
+        """Write a single 64 bytes sector."""
+        self._log(f"Writing sector {addr / 64}...")
+        self.send_packet(BOOT_CHIP_ERASE)
+        resp = self.get_response()
+        if resp:
+            return True
+        self._log("No response from devices.")
+        return False
+    
+    def send_verify_sector(self, addr, sector):
+        """Write a single 64 bytes sector."""
+        self._log(f"Writing sector {addr / 64}...")
+        self.send_packet(BOOT_CHIP_ERASE)
+        resp = self.get_response()
+        if resp:
+            return True
+        self._log("No response from devices.")
+        return False
+    
+
+
+
+    def (self, address, fw_id):
         """Sets the Firmware ID for a specific node."""
         self._log(f"Setting FW_ID to {fw_id} for {address}...")
         # Payload: [Type (0x00), fw_id]
@@ -329,72 +322,25 @@ class CH32V003Bootloader:
 
 def main():
     parser = argparse.ArgumentParser(description='CH32V003 Bootloader Tool')
-    parser.add_argument('--port', '-p', default='COM8')
-    parser.add_argument('--baud', '-b', type=int, default=9600)
-    parser.add_argument('--uid', help='Target UID')
-    parser.add_argument('-i', '--file', help='Firmware file')
-    parser.add_argument('--fw', type=int, default=0)
+    parser.add_argument('--port', '-p', help='COM Port')
+    parser.add_argument('--baud', '-b', type=int, default=115200)
+    parser.add_argument('-f', '--file', help='Firmware file')    
     
-    parser.add_argument('--set_fw_id', type=int, default=None, help='Set firmware id')
-    parser.add_argument('--set_node_id', type=int, default=None, help='Set node id')
-    
-    
-    # Use "nargs='?'" to make the value optional but immediately following the flag
-    # Use "const" to set the value if the flag is present but no value is provided
-    parser.add_argument('--search', type=int, nargs='?', const=63, help='Scan nodes. Optional: slot size (default 63)')
-    parser.add_argument('--verify', type=int, nargs='?', const=63, help='Verify CRC. Optional: slot size (default 63)')
-    
-    parser.add_argument('--write', action='store_true', help='Write firmware using -i file')
-    parser.add_argument('--run', action='store_true', help='Start application')
-
     args = parser.parse_args()
+
+    if not args.file:
+        print("Error: -i <file> is required")
+        return
+    
+    if not args.port:
+        print("Error: -p <port> is required")
+        return
+    
     loader = CH32V003Bootloader(args.port, args.baud, verbose=True)
 
     try:
-        loader.enter_bootloader()
-        
-        if args.set_fw_id:
-            loader.set_fw_id(args.uid, args.set_fw_id)
-
-        if args.set_node_id:
-            loader.set_node_id(args.uid, args.set_node_id)
-            
-            
-        
-        # Handle Writing firmware
-        if args.write:
-            if not args.file:
-                print("Error: -i (file) is required for --write")
-                return
-            with open(args.file, 'rb') as f:
-                loader.update_firmware(f.read(), args.fw)
-
-        # Handle Verification (Accepts value from --verify)
-        if args.verify is not None:
-            if not args.file:
-                print("Error: -i (file) is required for --verify")
-                return
-            
-            slot_count = args.verify # This will be the number after 
-            targets = [args.uid] if args.uid else [u for u, inf in loader.search_nodes(slot_count).items() if inf['fw'] == args.fw]
-            
-            with open(args.file, 'rb') as f:
-                data = f.read()
-                expected = binascii.crc32(data) & 0xFFFFFFFF
-                for uid in targets:
-                    res = loader.get_verify_crc(uid, len(data))
-                    status = "MATCH" if res == expected else "FAIL"
-                    print(f"Node {uid} | Expected: 0x{expected:08X} | Node: {f'0x{res:08X}' if res else 'TIMEOUT'} | {status}")
-
-        # Handle Standalone Search (Accepts value from --search)
-        if args.search is not None and args.verify is None:
-            slot_count = args.search
-            nodes = loader.search_nodes(slot_count)
-            for u, inf in nodes.items():
-                print(f"UID: {u} | Node-ID: {inf['node_id']} | FW-ID: {inf['fw']}")
-
-        if args.run:
-            loader.start_app()
+        with open(args.file, 'rb') as f:
+            loader.update_firmware(f.read(), args.fw)
 
                 
     finally:
