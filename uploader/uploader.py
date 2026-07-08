@@ -24,7 +24,7 @@ BOOT_INIT =          0x01
 BOOT_CHIP_ERASE =    0x02
 BOOT_WRITE_SECTOR =  0x03
 BOOT_VERIFY_SECTOR = 0x04
-BOOT_EXIT_BOOT =     0x2B
+BOOT_EXIT =     0x2B
 BOOT_VERIFY_REPORT = 0x85
 
 
@@ -143,7 +143,8 @@ class CH32V003Bootloader:
         self.send_packet(BOOT_INIT, 0x00)
         resp = self.get_response()
         if resp:
-            self._log(f"Done. {resp["addr"]}Devices found")
+            self.num_devices = resp["addr"]
+            self._log(f"Done. {self.num_devices} Devices found")
             return True
         self._log("No response from devices.")
         return False
@@ -162,7 +163,7 @@ class CH32V003Bootloader:
     def send_write_sector(self, addr, sector):
         """Write a single 64 bytes sector."""
         self._log(f"Writing sector {addr / 64}...")
-        self.send_packet(BOOT_CHIP_ERASE)
+        self.send_packet(BOOT_WRITE_SECTOR, addr, sector)
         resp = self.get_response()
         if resp:
             return True
@@ -170,105 +171,41 @@ class CH32V003Bootloader:
         return False
     
     def send_verify_sector(self, addr, sector):
-        """Write a single 64 bytes sector."""
-        self._log(f"Writing sector {addr / 64}...")
-        self.send_packet(BOOT_CHIP_ERASE)
+        """Verify a single 64 bytes sector."""
+        self._log(f"Verifing sector {addr / 64}...")
+        self.send_packet(BOOT_VERIFY_SECTOR, addr, sector)
         resp = self.get_response()
         if resp:
             return True
         self._log("No response from devices.")
         return False
     
-
-
-
-    def (self, address, fw_id):
-        """Sets the Firmware ID for a specific node."""
-        self._log(f"Setting FW_ID to {fw_id} for {address}...")
-        # Payload: [Type (0x00), fw_id]
-        self.send_packet(address, BOOT_SET_NODE_INFO, [0x00, fw_id & 0xFF])
+    def send_verify_report(self):
+        """Ask for verificatio0n result."""
+        self._log(f"Ask for verification result...")
+        self.send_packet(BOOT_VERIFY_REPORT)
         resp = self.get_response()
         if resp:
-            self._log("FW_ID updated successfully.")
-            return True
-        self._log("No response from node.")
-        return False
-
-    def set_node_id(self, address, node_id):
-        """Sets the 8-bit Node ID for a specific node."""
-        self._log(f"Setting Node ID to {node_id} for {address}...")
-        # Payload: [Type (0x01), node_id]
-        self.send_packet(address, BOOT_SET_NODE_INFO, [0x01, node_id & 0xFF])
-        resp = self.get_response()
-        if resp:
-            self._log("Node ID updated successfully.")
-            return True
-        self._log("No response from node.")
-        return False
-
-    def enter_bootloader(self, duration=1.0):
-        self._log(f"Holding synchronization (entering bootloader)...")
-        start_time = time.time()
-        with self.serial_lock:
-            while (time.time() - start_time) < duration:
-                self.ser.write([0x7F])
-        time.sleep(0.2)
-
-    def search_nodes(self, slots=100, retries=3):
-        """
-        1. Scans for nodes using collision avoidance.
-        2. Unsilences all nodes.
-        3. Queries each discovered UID for extended info.
-        """
-        self._log(f"Scanning for nodes ({slots} slots)...")
-        uids_found = [] 
-
-        # Discover UIDs
-        self.send_packet(BROADCAST_ID, BOOT_UNSILENCE)
-        for attempt in range(retries):
-            # Request IDs from nodes
-            self.send_packet(BROADCAST_ID, BOOT_GET_ID, [max(0, slots-32)])
-            end_search = time.time() + (slots * 0.05) + 0.2
-            
-            while time.time() < end_search:
-                resp = self.get_response(timeout=0.02)
-                if resp and resp['cmd'] == BOOT_GET_ID:
-                    uid_hex = bytes(resp['data']).hex().upper()
-                    if uid_hex not in uids_found:
-                        uids_found.append(uid_hex)
-                        self._log(f"Found {uid_hex}")
-                        # Silence this specific node so others can respond
-                        self.send_packet(uid_hex, BOOT_SILENCE)
-        
-        # Unsilence all nodes before querying info
-        self.send_packet(BROADCAST_ID, BOOT_UNSILENCE)
-        time.sleep(0.05) # Brief pause to ensure bus is ready
-
-        self._log("")
-        self._log(f"Found {len(uids_found)} unique nodes:")
-        self._log(f"{'UID':<20} | {'Node-ID':<10} | {'FW-ID':<10}")
-        self._log("-" * 46)
-        
-        # Query every found node for its specific info
-        discovered_devices = {}        
-        for uid in uids_found:
-            info = self.get_node_info(uid)
-            if info:
-                discovered_devices[uid] = info
-                self._log(f"{uid:<20} | {info['node_id']:<10} | {info['fw']:<10}")
+            num_verify_fail = resp["addr"]
+            if self.num_devices == 0:
+                self._log("All devices updated successfuly")
             else:
-                self._log(f"{uid:<20} | {'Error':<10} | {'Error':<10}")
-        
-        self._log("") # Padding newline
-        return discovered_devices
-
-    def get_node_info(self, address):
-        self.send_packet(address, BOOT_GET_NODE_INFO)
-        resp = self.get_response(timeout=0.5)
-        if resp and resp['cmd'] == BOOT_GET_NODE_INFO and len(resp['data']) >= 2:
-            return {'node_id': resp['data'][0], 'fw': resp['data'][1]}
-        return None
-
+                self._log(f"{num_verify_fail}/{self.num_devices} Devices failed verification")
+            return num_verify_fail
+        self._log("No response from devices.")
+        return -1
+    
+    def send_exit_boot(self):
+        """Exit bootloader."""
+        self._log(f"Exit bootloader...")
+        self.send_packet(BOOT_EXIT)
+        resp = self.get_response()
+        if resp:
+            self._log("Done.")
+            return True
+        self._log("No response from devices.")
+        return False
+       
     def update_firmware(self, firmware_data, fw_id=0):
         if len(firmware_data) % 64 != 0:
             padding = 64 - (len(firmware_data) % 64)
@@ -291,33 +228,6 @@ class CH32V003Bootloader:
 
         self.send_packet(BROADCAST_ID, BOOT_UNSILENCE)
         self._log(f"\nFinished in {time.perf_counter() - start_time:.2f}s")
-
-    def _broadcast_update_block(self, block_index, data, fw_id):
-        address = 0x08000000 + (block_index * 64)
-        raw_block = struct.pack('<I', address) + data
-        
-        corr = 0
-        for attempt in range(256):
-            if all((b - attempt) % 256 != PREAMBLE_BYTE for b in raw_block):
-                corr = attempt
-                break
-        
-        corrected_payload = bytes([(b - corr) % 256 for b in raw_block])
-        write_payload = bytes([fw_id & 0xFF, corr & 0xFF]) + corrected_payload
-        self.send_packet(BROADCAST_ID, BOOT_WRITE, write_payload)
-
-    def get_verify_crc(self, address, length):
-        payload = struct.pack('<II', 0x08000000, length)
-        self.send_packet(address, BOOT_GET_CRC, payload)
-        resp = self.get_response(timeout=1.0)
-        if resp and resp['cmd'] == BOOT_GET_CRC and len(resp['data']) == 4:
-            return struct.unpack('<I', resp['data'])[0]
-        return None
-
-    def start_app(self):
-        time.sleep(0.2)
-        self._log("Starting application...")
-        self.send_packet(BROADCAST_ID, BOOT_GO)
 
 
 def main():
