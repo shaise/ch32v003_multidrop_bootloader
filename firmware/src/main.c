@@ -57,6 +57,7 @@ void process_packet(Packet_t* rx){
     if (cmd == PROTOCMD_INIT) {
         boot_flags = 0;
         rx->address++;
+        //uart_write(8);
         packet_send(rx);
     } else if (cmd == PROTOCMD_VERIFY_SECTOR) {
         uint8_t *adr = (uint8_t *)(0x08000000u + rx->address);
@@ -67,6 +68,7 @@ void process_packet(Packet_t* rx){
             rx->address++;
         else
             boot_flags |= BOOTFLAG_UPGRADE_COMPLETE;
+        packet_send(rx);
     } else if(cmd == PROTOCMD_EXIT_BOOT){
         boot_exit=1;
     } else if (! (boot_flags & BOOTFLAG_UPGRADE_COMPLETE)) {
@@ -87,10 +89,10 @@ void process_packet(Packet_t* rx){
 void initialize(void){
     //Clock init
     //  HSI on, HSItrim 0x10
-    //  Systclk / 3 => 8Mhz
+    //  Systclk no scale => 24Mhz
     //  No wait states
     RCC->CTLR = 0x00000001 | (0x10<<3);
-    RCC->CFGR0 = RCC_HPRE_DIV3;
+    RCC->CFGR0 = 0; //RCC_HPRE_DIV3;
     //FLASH->ACTLR = 0x00000000; //0x00 at Reset, no need to change.
 
     //Enable Clocks blocks
@@ -99,12 +101,13 @@ void initialize(void){
     //Remapping:
     //  UARTTX to PD6, 
     //  PA-PA2 as GPIO
-    AFIO->PCFR1 = 0x00208000;
+    // AFIO->PCFR1 = 0x00208000;
 
     //GPIOD config
-    // PD6 Alternate Function Open-Drain (Mode 3, CNF 3)
+    // PD5 output multiplexed
     // PD1 pull-up for debugging.
-    GPIOD->CFGLR = 0x4F444484;
+    GPIOD->CFGLR = 0x44914484;
+    GPIOD->OUTDR = 0x10;
 
     uart_init();
 }
@@ -125,22 +128,30 @@ void deinitilize(void){
  */
 int main(){
     initialize();
-    boot_exit = 1<<20;       //~4.5 seconds
+    boot_exit = 0;       //~4.5 seconds
     
 
     while (1){        
         //Handle incomming data.
         if(uart_available()){
             uint8_t rx = uart_read();
+            uint8_t packet_valid = (Packet_Update_Rx(rx, &packet));
             if (!is_defered_mode())
                 uart_write(rx);
-            if(Packet_Update_Rx(rx, &packet)){
+            if (packet_valid) {
+                GPIOD->OUTDR ^= 0x10;
                 process_packet(&packet);
             }
         }
-        uart_poll();
+        uart_poll();        
 
-        if(boot_exit) {
+        if(boot_exit == 1) {
+            GPIOD->OUTDR ^= 0x10;
+            while (boot_exit < 0x10000) {
+                uart_poll();  
+                boot_exit++; // some delay to make sure uart tx complete
+            }
+            GPIOD->OUTDR ^= 0x10;
             deinitilize();
             bootloader_start_app();
         }

@@ -6,6 +6,7 @@ import threading
 import queue
 import sys
 import argparse
+import traceback
 
 # Protocol Constants
 PREAMBLE_BYTE = 0x7F
@@ -20,7 +21,7 @@ HDR_FLAG_64BIT = 0x02
 BROADCAST_ID = 0xFF
 
 # firmware update commands
-BOOT_INIT =          0x01
+BOOT_INIT =          0x81
 BOOT_CHIP_ERASE =    0x02
 BOOT_WRITE_SECTOR =  0x03
 BOOT_VERIFY_SECTOR = 0x04
@@ -31,7 +32,7 @@ BOOT_VERIFY_REPORT = 0x85
 class CH32V003Bootloader:
     HDR_MASK_TYPE = 0x01   # 0b0000 0001 (0 = Request, 1 = Response)
     
-    def __init__(self, port, baud=9600, verbose=False):
+    def __init__(self, port, baud=115200, verbose=False):
         self.verbose = verbose
         self.raw_buffer = bytearray()
         self.got_esc = False
@@ -39,8 +40,8 @@ class CH32V003Bootloader:
             self.ser = serial.Serial()
             self.ser.port     = port
             self.ser.baudrate = baud
-            self.ser.timeout  = 0.01
-            self.ser.stopbits = serial.STOPBITS_TWO
+            self.ser.timeout  = 0.1
+            self.ser.stopbits = serial.STOPBITS_ONE
 
             # keep both control lines low while opening
             self.ser.setDTR(False)
@@ -53,12 +54,12 @@ class CH32V003Bootloader:
             self._log(f"Error opening serial port {port}: {e}")
             return
             
-        self.rx_queue = queue.Queue()
-        self.stop_thread = False
-        self.serial_lock = threading.Lock()
+        # self.rx_queue = queue.Queue()
+        # self.stop_thread = False
+        # self.serial_lock = threading.Lock()
         
-        self.thread = threading.Thread(target=self._uart_reader_thread, daemon=True)
-        self.thread.start()
+        # self.thread = threading.Thread(target=self._uart_reader_thread, daemon=True)
+        # self.thread.start()
 
     def _log(self, message, end='\n'):
         if self.verbose:
@@ -66,9 +67,9 @@ class CH32V003Bootloader:
             sys.stdout.flush()
             
     def close(self):
-        self.stop_thread = True
-        if self.thread.is_alive():
-            self.thread.join()
+        # self.stop_thread = True
+        # if self.thread.is_alive():
+        #     self.thread.join()
         self.ser.close()
 
     # --- Communication Core ---
@@ -91,14 +92,15 @@ class CH32V003Bootloader:
         bufflen = len(buff)
         res = None
         if got_delim and  bufflen > 0:
-           len = buff[1] if  bufflen > 1 else 0
+           length = buff[1] if  bufflen > 1 else 0
            res = {
                     'cmd': buff[0],
-                    'len': len,
+                    'len': length,
                     'addr': buff[2] + 256 * buff[3] if bufflen > 3 else 0,
                     'data': buff[4:] if bufflen > 4 else [],
                     'raw': buff
                 }
+           # self._log(f"(<{bufflen}): {self.raw_buffer.hex(' ')}")
            self.raw_buffer.clear()
         return res
                 
@@ -106,7 +108,7 @@ class CH32V003Bootloader:
         if data is None: data = []
         buff = bytearray()
         buff.append(cmd)
-        if not address:
+        if address is None:
             buff.append(2)
         else:
             buff.append(4 + len(data))
@@ -121,6 +123,13 @@ class CH32V003Bootloader:
             else:
                 encbuff.append(b)
         encbuff.append(DELIM_BYTE)
+        # tbf = bytearray()
+        # for b in buff:
+        #     tbf.clear
+        #     tbf.append(b)
+        #     self.ser.write(tbf)
+        #     time.sleep(0.01)
+        # self._log(f"(>{len(buff)}): {encbuff.hex(' ')}")
         self.ser.write(encbuff)
         self.ser.flush()
 
@@ -143,6 +152,7 @@ class CH32V003Bootloader:
         self.send_packet(BOOT_INIT, 0x00)
         resp = self.get_response()
         if resp:
+            print(resp)
             self.num_devices = resp["addr"]
             self._log(f"Done. {self.num_devices} Devices found")
             return True
@@ -156,6 +166,7 @@ class CH32V003Bootloader:
         resp = self.get_response()
         if resp:
             self._log("Done.")
+            time.sleep(0.01)
             return True
         self._log("No response from devices.")
         return False
@@ -166,6 +177,7 @@ class CH32V003Bootloader:
         self.send_packet(BOOT_WRITE_SECTOR, addr, sector)
         resp = self.get_response()
         if resp:
+            time.sleep(0.01)
             return True
         self._log("No response from devices.")
         return False
@@ -183,7 +195,7 @@ class CH32V003Bootloader:
     def send_verify_report(self):
         """Ask for verificatio0n result."""
         self._log(f"Ask for verification result...")
-        self.send_packet(BOOT_VERIFY_REPORT)
+        self.send_packet(BOOT_VERIFY_REPORT, 0x0)
         resp = self.get_response()
         if resp:
             num_verify_fail = resp["addr"]
@@ -206,29 +218,51 @@ class CH32V003Bootloader:
         self._log("No response from devices.")
         return False
        
-    def update_firmware(self, firmware_data, fw_id=0):
+    def update_firmware(self, firmware_data):
         if len(firmware_data) % 64 != 0:
             padding = 64 - (len(firmware_data) % 64)
             firmware_data += b'\xFF' * padding
 
         total_blocks = len(firmware_data) // 64
-        self._log(f"Flashing {len(firmware_data)} bytes ({total_blocks} blocks) to FW-ID: {fw_id}")
+        self._log(f"Flashing {len(firmware_data)} bytes ({total_blocks} blocks)")
         
         start_time = time.perf_counter()
-        self.send_packet(BROADCAST_ID, BOOT_SILENCE)
+        if not self.send_init():
+            return False
+        
+        # if not self.send_erase_chip():
+        #     return False
+        
+        # sys.stdout.write(f"\rErasing Chip...")
+        # sys.stdout.flush()        
+        # sys.stdout.write(f"\n")
+
+        # for i, offset in enumerate(range(0, len(firmware_data), 64)):
+        #     chunk = firmware_data[offset:offset+64]
+        #     if not self.send_write_sector(offset, chunk):
+        #         return False
+            
+        #     # Progress bar
+        #     percent = (i + 1) / total_blocks * 100
+        #     sys.stdout.write(f"\rWriting Block {i+1}/{total_blocks} [{percent:.1f}%]")
+        #     sys.stdout.flush()
+        # sys.stdout.write(f"\n")
 
         for i, offset in enumerate(range(0, len(firmware_data), 64)):
             chunk = firmware_data[offset:offset+64]
-            self._broadcast_update_block(i, chunk, fw_id)
+            if not self.send_verify_sector(offset, chunk):
+                return False
             
             # Progress bar
             percent = (i + 1) / total_blocks * 100
-            sys.stdout.write(f"\rWriting Block {i+1}/{total_blocks} [{percent:.1f}%]")
+            sys.stdout.write(f"\rVerifing Block {i+1}/{total_blocks} [{percent:.1f}%]")
             sys.stdout.flush()
+        sys.stdout.write(f"\n")
 
-        self.send_packet(BROADCAST_ID, BOOT_UNSILENCE)
-        self._log(f"\nFinished in {time.perf_counter() - start_time:.2f}s")
+        if self.send_verify_report() < 0:
+            return False
 
+        return True
 
 def main():
     parser = argparse.ArgumentParser(description='CH32V003 Bootloader Tool')
@@ -239,7 +273,7 @@ def main():
     args = parser.parse_args()
 
     if not args.file:
-        print("Error: -i <file> is required")
+        print("Error: -f <file> is required")
         return
     
     if not args.port:
@@ -250,8 +284,11 @@ def main():
 
     try:
         with open(args.file, 'rb') as f:
-            loader.update_firmware(f.read(), args.fw)
-
+            print("File loaded.")
+            loader.update_firmware(f.read())
+    except Exception as e:
+        print(f"Upgrade failed.({e})")
+        traceback.print_exc()
                 
     finally:
         loader.close()

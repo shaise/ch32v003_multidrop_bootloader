@@ -28,6 +28,7 @@ static inline uint8_t tx_pop() // assumes byte available - no checks
 {
     uint8_t res = tx_buffer[tx_tail];
     tx_tail++;
+    tx_tail &= TXBUFF_MASK;
     tx_full = 0;
     return res;
 }
@@ -61,13 +62,22 @@ void uart_write(uint8_t ch){
         else
             USART1->DATAR = ch;
     }
+    else
+        tx_push(ch);
 }
 
 /**
  * @brief check if we got incomming data
  */
-uint32_t uart_available(void){
+uint8_t uart_available(void){
     return (USART1->STATR & USART_FLAG_RXNE) != (uint16_t)RESET;
+}
+
+/**
+ * @brief check if uart is ready to send a byte
+ */
+uint8_t uart_tx_ready(void){
+    return (USART1->STATR & USART_FLAG_TXE) != (uint16_t)RESET;
 }
 
 /**
@@ -86,13 +96,13 @@ void uart_init(void){
     // 9600 bps @ 8Mhz
     // Half-duplex
     // Eanabled with Tx and RX 
-    USART1->BRR = 833;
-    USART1->CTLR3 = USART_CTLR3_HDSEL; 
+    USART1->BRR = 208;
+    // USART1->CTLR3 = USART_CTLR3_HDSEL; 
     USART1->CTLR1 = USART_CTLR1_UE | USART_CTLR1_TE | USART_CTLR1_RE;
 }
 
 void uart_deinit(void){
     //Disable Uart.
     USART1->CTLR1 = 0;
-    USART1->CTLR3 = 0; 
+    // USART1->CTLR3 = 0; 
 }

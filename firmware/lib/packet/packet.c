@@ -41,7 +41,8 @@ uint8_t Packet_Update_Rx(uint8_t byte, Packet_t *pkt) {
     // --- Resync Logic ---
     // Always active to detect resync.
     if (byte == DELIMITER_BYTE) {
-        uint8_t valid_packet = rx_index > 1 && rx_index == pkt->packet_len;
+        uint8_t valid_packet = (rx_index > 1 && rx_index == pkt->packet_len) 
+                || (pkt->command == PROTOCMD_EXIT_BOOT && pkt->packet_len == '-');
         rx_index = 0;
         protocol_flags &= ~PROTOFLAG_DEFERED_MODE;
         return valid_packet;
@@ -56,8 +57,12 @@ uint8_t Packet_Update_Rx(uint8_t byte, Packet_t *pkt) {
     if (rx_index == 0 && (byte & 0x80))
         protocol_flags |= PROTOFLAG_DEFERED_MODE;
 
-    uint8_t *pkt_addr = (uint8_t *)pkt;
-    pkt_addr[rx_index] = byte;
+    if (rx_index < sizeof(Packet_t))
+    {
+        uint8_t *pkt_addr = (uint8_t *)pkt;
+        pkt_addr[rx_index] = byte;
+        rx_index++;
+    }
 
     return 0;
 }
