@@ -78,7 +78,7 @@ void process_packet(Packet_t* rx){
         } else if (cmd == PROTOCMD_WRITE_SECTOR) {
             uint32_t adr = 0x08000000u + rx->address;
             // flash_erase(adr);
-            flash_write(adr, &rx->data[4]);  
+            flash_write(adr, &rx->data[0]);  
         } 
     }
 }
@@ -105,7 +105,7 @@ void initialize(void){
 
     //GPIOD config
     // PD5 output multiplexed
-    // PD1 pull-up for debugging.
+    // PD4 led for debugging.
     GPIOD->CFGLR = 0x44914484;
     GPIOD->OUTDR = 0x10;
 
@@ -129,6 +129,7 @@ void deinitilize(void){
 int main(){
     initialize();
     boot_exit = 0;       //~4.5 seconds
+    GPIOD->OUTDR ^= 0x10;
     
 
     while (1){        
